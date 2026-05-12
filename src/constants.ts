@@ -22,7 +22,7 @@ export const DEPARTMENTS = [
 ];
 
 export const NAV_ITEMS = [
-  { name: "الاستيراد والتحليل", href: "/", icon: FileUp },
+  { name: "التحليل", href: "/", icon: FileUp },
   { name: "الإحصائيات", href: "/statistics", icon: TrendingUp },
 ];
 

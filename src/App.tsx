@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation, Navigate, Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Sidebar } from './components/layout/Sidebar';
+import { FileUp, BarChart3 } from 'lucide-react';
 import Statistics from './pages/Statistics';
 import Import from './pages/Import';
+import { cn } from './lib/utils';
 
 const PageTransition = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
@@ -19,6 +20,39 @@ const PageTransition = ({ children }: { children: React.ReactNode }) => {
         {children}
       </motion.div>
     </AnimatePresence>
+  );
+};
+
+// Navigation tabs — moved from sidebar into the header
+const HeaderTabs = () => {
+  const location = useLocation();
+  
+  const tabs = [
+    { path: '/', label: 'الاستيراد', icon: FileUp },
+    { path: '/statistics', label: 'الإحصائيات', icon: BarChart3 },
+  ];
+
+  return (
+    <nav className="flex items-center gap-2 bg-slate-50/70 backdrop-blur-md p-1.5 rounded-2xl border border-slate-100">
+      {tabs.map(tab => {
+        const isActive = location.pathname === tab.path;
+        return (
+          <Link
+            key={tab.path}
+            to={tab.path}
+            className={cn(
+              "flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-xs font-black transition-all relative",
+              isActive
+                ? "bg-white text-indigo-600 shadow-sm"
+                : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <tab.icon size={16} strokeWidth={2.5} />
+            <span>{tab.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 };
 
@@ -42,29 +76,20 @@ function MainApp() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC] font-sans text-[#1E293B] overflow-hidden" dir="rtl">
-      <Sidebar />
-      
-      <main className="flex-1 mr-72 flex flex-col h-screen overflow-hidden">
-        <header className="h-24 bg-white/30 backdrop-blur-md border-b border-white flex items-center justify-between px-10 shrink-0">
-          <div className="flex items-center gap-6">
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-[#1E293B]" dir="rtl">
+      <main className="flex flex-col min-h-screen">
+        <header className="h-24 bg-white/30 backdrop-blur-md border-b border-white flex items-center justify-between px-10 shrink-0 sticky top-0 z-40">
+          <div className="flex items-center gap-10">
             <div className="flex flex-col">
               <h1 className="text-2xl font-black text-slate-900 tracking-tight">Jamaa Platform</h1>
               <p className="text-slate-400 font-black text-[10px] uppercase tracking-widest -mt-1">نظام تحليل البيانات المؤسساتي الذكي</p>
             </div>
-          </div>
-          <div className="flex items-center gap-4">
-             <div className="h-10 w-10 rounded-2xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 shadow-sm">
-               <span className="text-xs font-black">EN</span>
-             </div>
-             <div className="px-5 py-2.5 bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-500/20">
-               Live v2.7
-             </div>
+            <HeaderTabs />
           </div>
         </header>
 
         <div className="flex-1 p-10 overflow-y-auto scrollbar-hide">
-          <div className="max-w-7xl mx-auto pb-10">
+          <div className="w-full pb-10">
             <Routes>
               <Route path="/" element={<PageTransition><Import onDataUpdate={handleDataUpdate} initialData={sharedData} initialColumns={sharedColumns} /></PageTransition>} />
               <Route path="/statistics" element={<PageTransition><Statistics data={sharedData} columns={sharedColumns} /></PageTransition>} />
