@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "Department": {
+      "title": "Department",
+      "description": "A municipal department",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the department" },
+        "slug": { "type": "string", "description": "URL-friendly identifier" },
+        "description": { "type": "string", "description": "Description of the department" },
+        "icon": { "type": "string", "description": "Lucide icon name" }
+      },
+      "required": ["name", "slug"]
+    },
+    "Record": {
+      "title": "Service Record",
+      "description": "A data record belonging to a department",
+      "type": "object",
+      "properties": {
+        "departmentId": { "type": "string", "description": "ID of the department this record belongs to" },
+        "name": { "type": "string", "description": "Name or title of the file/person" },
+        "fileNumber": { "type": "string", "description": "Unique reference number" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"], "description": "Current status of the file" },
+        "date": { "type": "string", "format": "date-time", "description": "Date of the record" },
+        "amount": { "type": "number", "description": "Financial value if applicable" },
+        "data": { "type": "object", "description": "Additional custom fields from Excel" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["departmentId", "status", "date"]
+    }
+  },
+  "firestore": {
+    "departments": {
+      "schema": "Department",
+      "description": "List of municipal departments"
+    },
+    "records": {
+      "schema": "Record",
+      "description": "Consolidated records for all departments"
+    }
+  }
+}

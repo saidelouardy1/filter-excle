@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidDepartment(data) {
+      return data.keys().hasAll(['name', 'slug']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.slug is string && data.slug.matches('^[a-z0-9-]+$');
+    }
+
+    function isValidRecord(data) {
+      return data.keys().count() >= 7 &&
+             data.departmentId is string &&
+             data.name is string &&
+             data.fileNumber is string &&
+             data.status in ['Pending', 'Approved', 'Rejected'] &&
+             data.date is string &&
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    match /departments/{deptId} {
+      allow read: if true;
+      allow write: if isValidId(deptId) && isValidDepartment(incoming());
+    }
+
+    match /records/{recordId} {
+      allow read: if true;
+      allow create: if isValidId(recordId) && isValidRecord(incoming());
+      allow update: if isValidId(recordId) && isValidRecord(incoming());
+      allow delete: if true;
+    }
+  }
+}

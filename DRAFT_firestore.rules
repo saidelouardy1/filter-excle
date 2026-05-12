@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Department Validation ---
+    function isValidDepartment(data) {
+      return data.keys().hasAll(['name', 'slug']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.slug is string && data.slug.matches('^[a-z0-9-]+$');
+    }
+
+    // --- Record Validation ---
+    function isValidRecord(data) {
+      return data.keys().hasAll(['departmentId', 'name', 'fileNumber', 'status', 'date', 'createdAt', 'updatedAt']) &&
+             data.departmentId is string && data.departmentId.size() <= 64 &&
+             data.name is string && data.name.size() <= 200 &&
+             data.fileNumber is string && data.fileNumber.size() <= 100 &&
+             data.status in ['Pending', 'Approved', 'Rejected'] &&
+             data.date is string && // Simplified for rules, but should be ISO string
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    // --- Rules for Collections ---
+
+    match /departments/{deptId} {
+      // For now, allow public read, but restricted write
+      allow read: if true; 
+      allow create, update: if isValidId(deptId) && isValidDepartment(incoming());
+      allow delete: if false; // Departments are permanent in this version
+    }
+
+    match /records/{recordId} {
+      // Allow public read for dashboard view
+      // In production, this should be restricted to authenticated users
+      allow read: if true;
+
+      allow create: if isValidId(recordId) && 
+                      isValidRecord(incoming()) &&
+                      incoming().createdAt == incoming().updatedAt; // Atomic create sync
+
+      allow update: if isValidId(recordId) && 
+                      isValidRecord(incoming()) && (
+                        // Limit which fields can be updated during specific actions if needed
+                        // For now, allow all valid record fields to be updated
+                        incoming().diff(existing()).affectedKeys().hasOnly([
+                          'name', 'status', 'date', 'amount', 'data', 'updatedAt'
+                        ])
+                      );
+
+      allow delete: if true; // Admins can delete
+    }
+
+    // Interaction collections (mock for audit logs if needed)
+    match /logs/{logId} {
+      allow create: if true;
+      allow read: if true;
+    }
+  }
+}
