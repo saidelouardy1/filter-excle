@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -14,7 +14,7 @@ import {
 } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { 
   BarChart3, 
   PieChart as PieIcon, 
@@ -62,10 +62,12 @@ export default function Statistics({ data, columns }: StatisticsProps) {
   const [compareCol2, setCompareCol2] = useState(columns[1] || columns[0] || '');
   const [isComparisonMode, setIsComparisonMode] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
-  const reportRef = useRef<HTMLDivElement>(null);
+  const pdfReportRef = useRef<HTMLDivElement>(null);
 
-  useMemo(() => {
+  // FIX: useEffect instead of useMemo for side effects
+  useEffect(() => {
     if (columns.length > 0) {
       if (!selectedCol) setSelectedCol(columns[0]);
       if (!compareCol1) setCompareCol1(columns[0]);
@@ -77,7 +79,6 @@ export default function Statistics({ data, columns }: StatisticsProps) {
     if (!data.length) return null;
 
     if (isComparisonMode) {
-      // Logic for two-column comparison
       if (!compareCol1 || !compareCol2) return null;
 
       const count1 = data.filter(row => row[compareCol1] !== null && row[compareCol1] !== undefined && String(row[compareCol1]).trim() !== '').length;
@@ -92,7 +93,6 @@ export default function Statistics({ data, columns }: StatisticsProps) {
 
       return { labels, values, percentages, total, isComparison: true };
     } else {
-      // Standard single column analysis
       if (!selectedCol) return null;
       
       const counts: Record<string, number> = {};
@@ -111,14 +111,14 @@ export default function Statistics({ data, columns }: StatisticsProps) {
   }, [data, selectedCol, compareCol1, compareCol2, isComparisonMode]);
 
   const softColors = [
-    'rgba(16, 185, 129, 0.75)', // Green
-    'rgba(139, 92, 246, 0.75)', // Purple
-    'rgba(59, 130, 246, 0.65)', // Blue
-    'rgba(236, 72, 153, 0.65)', // Pink
-    'rgba(245, 158, 11, 0.7)',  // Amber
-    'rgba(20, 184, 166, 0.7)',  // Teal
-    'rgba(99, 102, 241, 0.7)',  // Indigo
-    'rgba(100, 116, 139, 0.7)', // Slate
+    'rgba(16, 185, 129, 0.75)',
+    'rgba(139, 92, 246, 0.75)',
+    'rgba(59, 130, 246, 0.65)',
+    'rgba(236, 72, 153, 0.65)',
+    'rgba(245, 158, 11, 0.7)',
+    'rgba(20, 184, 166, 0.7)',
+    'rgba(99, 102, 241, 0.7)',
+    'rgba(100, 116, 139, 0.7)',
   ];
 
   const doughnutData = {
@@ -143,30 +143,28 @@ export default function Statistics({ data, columns }: StatisticsProps) {
   };
 
   const handleGeneratePDF = async () => {
-    if (!reportRef.current || isGeneratingPDF) return;
+    if (isGeneratingPDF) return;
+
+    if (!data.length) {
+      setErrorMsg("لا توجد بيانات للتقرير");
+      return;
+    }
+
+    if (!pdfReportRef.current) {
+      setErrorMsg("لا يمكن إنشاء التقرير حالياً.");
+      return;
+    }
     
     setIsGeneratingPDF(true);
+    setErrorMsg(null);
     try {
-      // Use a timeout to ensure everything is rendered
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 800));
       
-      // Capture the report element
-      const canvas = await html2canvas(reportRef.current, {
+      const canvas = await html2canvas(pdfReportRef.current, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
-        windowWidth: 1200,
         logging: false,
-        onclone: (clonedDoc) => {
-          const report = clonedDoc.getElementById('pdf-report');
-          if (report) {
-            report.style.display = 'block';
-            report.style.position = 'static';
-            report.style.visibility = 'visible';
-            // Force standard colors to avoid oklab/oklch issues in html2canvas
-            report.style.color = '#0f172a';
-          }
-        }
       });
       
       if (!canvas || canvas.width === 0) {
@@ -178,13 +176,11 @@ export default function Statistics({ data, columns }: StatisticsProps) {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       
-      // If content is longer than one page, it will be scaled down to fit one page width
-      // Better to split but for now we fit to width
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`تقرير-إحصائيات-${new Date().getTime()}.pdf`);
     } catch (error) {
       console.error("PDF Generation Error:", error);
-      alert("حدث خطأ أثناء إنشاء ملف PDF. المرجو المحاولة مرة أخرى.");
+      setErrorMsg("حدث خطأ أثناء إنشاء ملف PDF. المرجو المحاولة مرة أخرى.");
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -210,7 +206,6 @@ export default function Statistics({ data, columns }: StatisticsProps) {
 
   return (
     <div className="space-y-12 pb-24 max-w-[1400px] mx-auto pt-8" dir="rtl">
-      {/* Soft Header */}
       <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-10">
         <div className="space-y-3">
           <div className="flex items-center gap-4">
@@ -236,6 +231,9 @@ export default function Statistics({ data, columns }: StatisticsProps) {
               ? "قارن بين عمودين مهمين من بياناتك لرؤية العلاقة والتوزيع النسبي بينهما."
               : "استكشف البيانات الخاصة بك من خلال لوحة تحكم ذكية وعصرية."}
           </p>
+          {errorMsg && (
+            <p className="text-rose-600 font-black text-sm">{errorMsg}</p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
@@ -286,7 +284,7 @@ export default function Statistics({ data, columns }: StatisticsProps) {
             className="flex items-center gap-3 bg-emerald-500/90 backdrop-blur-md text-white px-8 h-14 rounded-2xl font-black shadow-lg shadow-emerald-500/10 hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
           >
             {isGeneratingPDF ? (
-              <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin" />
+              <div className="w-5 h-5 border-[3px] border-white border-t-transparent rounded-full animate-spin" />
             ) : (
               <Download size={20} />
             )}
@@ -295,7 +293,6 @@ export default function Statistics({ data, columns }: StatisticsProps) {
         </div>
       </header>
 
-      {/* Elegant Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
         {!isComparisonMode ? (
           <>
@@ -320,7 +317,7 @@ export default function Statistics({ data, columns }: StatisticsProps) {
             {[
               { label: compareCol1, value: stats?.values[0], icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-50/50', subtitle: `${stats?.percentages[0]}% من الإجمالي` },
               { label: compareCol2, value: stats?.values[1], icon: Users, color: 'text-indigo-500', bg: 'bg-indigo-50/50', subtitle: `${stats?.percentages[1]}% من الإجمالي` },
-              { label: 'فارق الجمهور', value: Math.abs(stats?.values[0] - stats?.values[1]), icon: TrendingUp, color: 'text-amber-500', bg: 'bg-amber-50/50', subtitle: 'الفرق العددي' },
+              { label: 'فارق الجمهور', value: Math.abs((stats?.values[0] || 0) - (stats?.values[1] || 0)), icon: TrendingUp, color: 'text-amber-500', bg: 'bg-amber-50/50', subtitle: 'الفرق العددي' },
               { label: 'إجمالي المقارنة', value: stats?.total, icon: Hash, color: 'text-slate-500', bg: 'bg-slate-50/50', subtitle: 'العينات المشمولة' },
             ].map((item, i) => (
               <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} className="glass-card p-8 rounded-[2.5rem] hover:shadow-xl hover:shadow-indigo-500/5 transition-all group">
@@ -336,7 +333,6 @@ export default function Statistics({ data, columns }: StatisticsProps) {
         )}
       </div>
 
-      {/* Charts with Modern Style */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
         <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="glass-card p-10 rounded-[3rem]">
           <div className="flex items-center gap-4 mb-12">
@@ -361,7 +357,7 @@ export default function Statistics({ data, columns }: StatisticsProps) {
                   datalabels: { 
                     color: '#fff', 
                     font: { weight: 'bold', size: 12, family: 'Tajawal' }, 
-                    formatter: (v, ctx) => {
+                    formatter: (v) => {
                       const total = stats?.total || 1;
                       return v > (total * 0.05) ? `${v}\n(${((v/total)*100).toFixed(1)}%)` : '';
                     },
@@ -408,7 +404,6 @@ export default function Statistics({ data, columns }: StatisticsProps) {
         </motion.div>
       </div>
 
-      {/* Modern Table */}
       <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-card rounded-[3rem] overflow-hidden">
         <div className="p-10 border-b border-slate-50 flex items-center justify-between">
            <div className="space-y-1">
@@ -450,9 +445,21 @@ export default function Statistics({ data, columns }: StatisticsProps) {
       </motion.div>
 
       {/* Hidden Printable Report Section */}
-      <div className="fixed left-[-9999px] top-0 pointer-events-none" aria-hidden="true">
-        <div id="pdf-report" ref={reportRef} className="w-[1000px] p-20 bg-white space-y-12" dir="rtl" style={{ fontFamily: 'Tajawal, sans-serif', color: '#0f172a' }}>
-          <div className="flex justify-between items-start border-b-2 border-slate-100 pb-10" style={{ borderColor: '#f1f5f9' }}>
+      <div 
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '1000px',
+          opacity: 0,
+          zIndex: -1,
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        }} 
+        aria-hidden="true"
+      >
+        <div id="pdf-report" ref={pdfReportRef} className="p-20 space-y-12" dir="rtl" style={{ fontFamily: 'Tajawal, sans-serif', color: '#0f172a', width: '1000px', backgroundColor: '#ffffff' }}>
+          <div className="flex justify-between items-start pb-10" style={{ borderBottom: '2px solid #f1f5f9' }}>
             <div className="space-y-2">
               <h1 className="text-5xl font-black" style={{ color: '#0f172a' }}>تقرير الإحصائيات</h1>
               <p className="font-bold text-xl uppercase tracking-widest" style={{ color: '#94a3b8' }}>Statistical Analysis Report</p>
@@ -464,13 +471,13 @@ export default function Statistics({ data, columns }: StatisticsProps) {
           </div>
 
           <div className="grid grid-cols-2 gap-8">
-             <div className="p-8 rounded-3xl border space-y-1" style={{ backgroundColor: '#f8fafc', borderColor: '#f1f5f9' }}>
+             <div className="p-8 rounded-3xl space-y-1" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
                <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#94a3b8' }}>نوع التحليل</p>
                <p className="text-2xl font-black" style={{ color: '#4f46e5' }}>
                  {isComparisonMode ? "مقارنة ثنائية" : `تحليل محتوى: ${selectedCol}`}
                </p>
              </div>
-             <div className="p-8 rounded-3xl border space-y-1" style={{ backgroundColor: '#f8fafc', borderColor: '#f1f5f9' }}>
+             <div className="p-8 rounded-3xl space-y-1" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
                <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#94a3b8' }}>إجمالي السجلات</p>
                <p className="text-2xl font-black" style={{ color: '#0f172a' }}>{stats?.total} عينة</p>
              </div>
@@ -478,8 +485,8 @@ export default function Statistics({ data, columns }: StatisticsProps) {
 
           <div className="grid grid-cols-2 gap-12">
             <div className="space-y-10">
-               <h3 className="text-xl font-black border-r-4 pr-4" style={{ color: '#0f172a', borderColor: '#4f46e5' }}>الجدول الإحصائي</h3>
-               <table className="w-full text-right border-collapse">
+               <h3 className="text-xl font-black pr-4" style={{ color: '#0f172a', borderRight: '4px solid #4f46e5' }}>الجدول الإحصائي</h3>
+               <table className="w-full text-right" style={{ borderCollapse: 'collapse' }}>
                  <thead>
                    <tr style={{ backgroundColor: '#f8fafc' }}>
                      <th className="px-6 py-4 text-xs font-black uppercase" style={{ color: '#94a3b8' }}>القيمة</th>
@@ -487,9 +494,9 @@ export default function Statistics({ data, columns }: StatisticsProps) {
                      <th className="px-6 py-4 text-xs font-black uppercase" style={{ color: '#94a3b8' }}>النسبة</th>
                    </tr>
                  </thead>
-                 <tbody className="divide-y" style={{ borderColor: '#f1f5f9' }}>
+                 <tbody>
                    {stats?.labels.map((l, i) => (
-                     <tr key={l}>
+                     <tr key={l} style={{ borderBottom: '1px solid #f1f5f9' }}>
                        <td className="px-6 py-4 font-black text-sm" style={{ color: '#475569' }}>{l}</td>
                        <td className="px-6 py-4 font-black text-sm" style={{ color: '#0f172a' }}>{stats.values[i]}</td>
                        <td className="px-6 py-4 font-black text-sm font-mono" style={{ color: '#4f46e5' }}>{stats.percentages[i]}%</td>
@@ -499,7 +506,7 @@ export default function Statistics({ data, columns }: StatisticsProps) {
                </table>
             </div>
             <div className="space-y-12">
-               <div className="h-64">
+               <div style={{ height: '256px' }}>
                  <h3 className="text-sm font-black uppercase mb-4 text-center" style={{ color: '#94a3b8' }}>التوزيع الدائري</h3>
                  <Doughnut 
                   data={doughnutData} 
@@ -507,12 +514,12 @@ export default function Statistics({ data, columns }: StatisticsProps) {
                     maintainAspectRatio: false, 
                     plugins: { 
                       legend: { position: 'bottom', labels: { font: { weight: 'bold', size: 10, family: 'Tajawal' }, color: '#64748b' } },
-                      datalabels: { color: '#fff', font: { weight: 'bold', size: 10, family: 'Tajawal' }, formatter: (v) => `${((v/stats!.total)*100).toFixed(0)}%` }
+                      datalabels: { color: '#fff', font: { weight: 'bold', size: 10, family: 'Tajawal' }, formatter: (v) => `${((v/(stats?.total || 1))*100).toFixed(0)}%` }
                     } 
                   }} 
                 />
                </div>
-               <div className="h-64 pt-8">
+               <div style={{ height: '256px', paddingTop: '32px' }}>
                  <h3 className="text-sm font-black uppercase mb-4 text-center" style={{ color: '#94a3b8' }}>التمثيل البياني</h3>
                  <Bar 
                   data={barData} 
@@ -532,7 +539,7 @@ export default function Statistics({ data, columns }: StatisticsProps) {
             </div>
           </div>
 
-          <div className="pt-20 border-t text-center" style={{ borderColor: '#f1f5f9' }}>
+          <div className="pt-20 text-center" style={{ borderTop: '1px solid #f1f5f9' }}>
             <p className="text-[10px] font-black uppercase tracking-[0.5em]" style={{ color: '#cbd5e1' }}>End of Official Report • Jamaa Stats</p>
           </div>
         </div>

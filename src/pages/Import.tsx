@@ -67,7 +67,8 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   
-  const reportRef = useRef<HTMLDivElement>(null);
+  // FIX: Separate ref for the hidden PDF report (was colliding with the visible content ref before)
+  const pdfReportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (initialColumns.length > 0 && !analysisColumn) {
@@ -146,14 +147,14 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
   }, [data, analysisColumn]);
 
   const softColors = [
-    'rgba(16, 185, 129, 0.75)', // Green
-    'rgba(139, 92, 246, 0.75)', // Purple
-    'rgba(59, 130, 246, 0.65)', // Blue
-    'rgba(236, 72, 153, 0.65)', // Pink
-    'rgba(245, 158, 11, 0.7)',  // Amber
-    'rgba(20, 184, 166, 0.7)',  // Teal
-    'rgba(99, 102, 241, 0.7)',  // Indigo
-    'rgba(100, 116, 139, 0.7)', // Slate
+    'rgba(16, 185, 129, 0.75)',
+    'rgba(139, 92, 246, 0.75)',
+    'rgba(59, 130, 246, 0.65)',
+    'rgba(236, 72, 153, 0.65)',
+    'rgba(245, 158, 11, 0.7)',
+    'rgba(20, 184, 166, 0.7)',
+    'rgba(99, 102, 241, 0.7)',
+    'rgba(100, 116, 139, 0.7)',
   ];
 
   const chartData = {
@@ -168,34 +169,30 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
   };
 
   const handleGeneratePDF = async () => {
-    if (!reportRef.current || isGeneratingPDF) return;
+    if (isGeneratingPDF) return;
+
+    if (!data.length) {
+      setErrorMsg("المرجو رفع ملف Excel أولا");
+      return;
+    }
+
+    if (!pdfReportRef.current) {
+      setErrorMsg("لا يمكن إنشاء التقرير حالياً.");
+      return;
+    }
 
     try {
-      if (!data.length) {
-        setErrorMsg("المرجو رفع ملف Excel أولا");
-        return;
-      }
       setIsGeneratingPDF(true);
+      setErrorMsg(null);
       
-      // Use a timeout to ensure everything is rendered
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Give charts time to render fully
+      await new Promise(resolve => setTimeout(resolve, 800));
       
-      const canvas = await html2canvas(reportRef.current, {
+      const canvas = await html2canvas(pdfReportRef.current, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
-        windowWidth: 1200,
         logging: false,
-        onclone: (clonedDoc) => {
-          const report = clonedDoc.getElementById('pdf-report');
-          if (report) {
-            report.style.display = 'block';
-            report.style.position = 'static';
-            report.style.visibility = 'visible';
-            // Force standard colors to avoid oklab/oklch issues in html2canvas
-            report.style.color = '#0f172a';
-          }
-        }
       });
       
       if (!canvas || canvas.width === 0) {
@@ -247,7 +244,7 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
               className="flex items-center gap-3 bg-emerald-500/90 backdrop-blur-md text-white px-8 h-14 rounded-2xl font-black shadow-lg shadow-emerald-500/10 hover:bg-emerald-600 transition-all active:scale-95 disabled:opacity-50"
             >
               {isGeneratingPDF ? (
-                <div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-5 h-5 border-[3px] border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Download size={20} />
               )}
@@ -298,7 +295,7 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
           </div>
           {loading && (
             <div className="flex items-center gap-4 bg-white/80 backdrop-blur px-8 py-3 rounded-full shadow-sm text-indigo-600 font-black">
-              <div className="w-5 h-5 border-3 border-current border-t-transparent rounded-full animate-spin" />
+              <div className="w-5 h-5 border-[3px] border-current border-t-transparent rounded-full animate-spin" />
               جاري معالجة البيانات...
             </div>
           )}
@@ -398,7 +395,8 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
             )}
           </div>
 
-          <div ref={reportRef} className="lg:col-span-8 space-y-10">
+          {/* FIX: removed ref={reportRef} from this visible content div (was colliding with hidden PDF div) */}
+          <div className="lg:col-span-8 space-y-10">
             {stats && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="glass-card p-8 rounded-[2.5rem] flex items-center justify-between group">
@@ -513,10 +511,22 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
         </div>
       )}
       
-      {/* Hidden Printable Report Section */}
-      <div className="fixed left-[-9999px] top-0 pointer-events-none" aria-hidden="true">
-        <div id="pdf-report" ref={reportRef} className="w-[1000px] p-20 bg-white space-y-12" dir="rtl" style={{ fontFamily: 'Tajawal, sans-serif', color: '#0f172a' }}>
-          <div className="flex justify-between items-start border-b-2 border-slate-100 pb-10" style={{ borderColor: '#f1f5f9' }}>
+      {/* Hidden Printable Report Section — uses opacity:0 + z-index:-1 instead of left:-9999px so html2canvas can measure it correctly */}
+      <div 
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '1000px',
+          opacity: 0,
+          zIndex: -1,
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        }} 
+        aria-hidden="true"
+      >
+        <div id="pdf-report" ref={pdfReportRef} className="p-20 bg-white space-y-12" dir="rtl" style={{ fontFamily: 'Tajawal, sans-serif', color: '#0f172a', width: '1000px', backgroundColor: '#ffffff' }}>
+          <div className="flex justify-between items-start pb-10" style={{ borderBottom: '2px solid #f1f5f9' }}>
             <div className="space-y-2">
               <h1 className="text-5xl font-black" style={{ color: '#0f172a' }}>تقرير البيانات المباشرة</h1>
               <p className="font-bold text-xl uppercase tracking-widest" style={{ color: '#94a3b8' }}>Live Data Analysis Report</p>
@@ -528,11 +538,11 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
           </div>
 
           <div className="grid grid-cols-2 gap-8">
-             <div className="p-8 rounded-3xl border space-y-1" style={{ backgroundColor: '#f8fafc', borderColor: '#f1f5f9' }}>
+             <div className="p-8 rounded-3xl space-y-1" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
                <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#94a3b8' }}>تحليل عمود</p>
                <p className="text-2xl font-black" style={{ color: '#4f46e5' }}>{analysisColumn || "غير محدد"}</p>
              </div>
-             <div className="p-8 rounded-3xl border space-y-1" style={{ backgroundColor: '#f8fafc', borderColor: '#f1f5f9' }}>
+             <div className="p-8 rounded-3xl space-y-1" style={{ backgroundColor: '#f8fafc', border: '1px solid #f1f5f9' }}>
                <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#94a3b8' }}>إجمالي السجلات</p>
                <p className="text-2xl font-black" style={{ color: '#0f172a' }}>{data.length} سجل</p>
              </div>
@@ -540,8 +550,8 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
 
           <div className="grid grid-cols-2 gap-12">
             <div className="space-y-10">
-               <h3 className="text-xl font-black border-r-4 pr-4" style={{ color: '#0f172a', borderColor: '#4f46e5' }}>تفاصيل الفئات</h3>
-               <table className="w-full text-right border-collapse">
+               <h3 className="text-xl font-black pr-4" style={{ color: '#0f172a', borderRight: '4px solid #4f46e5' }}>تفاصيل الفئات</h3>
+               <table className="w-full text-right" style={{ borderCollapse: 'collapse' }}>
                  <thead>
                    <tr style={{ backgroundColor: '#f8fafc' }}>
                      <th className="px-6 py-4 text-xs font-black uppercase" style={{ color: '#94a3b8' }}>القيمة</th>
@@ -549,9 +559,9 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
                      <th className="px-6 py-4 text-xs font-black uppercase" style={{ color: '#94a3b8' }}>النسبة</th>
                    </tr>
                  </thead>
-                 <tbody className="divide-y" style={{ borderColor: '#f1f5f9' }}>
+                 <tbody>
                    {stats?.labels.map((l, i) => (
-                     <tr key={l}>
+                     <tr key={l} style={{ borderBottom: '1px solid #f1f5f9' }}>
                        <td className="px-6 py-4 font-black text-sm" style={{ color: '#475569' }}>{l}</td>
                        <td className="px-6 py-4 font-black text-sm" style={{ color: '#0f172a' }}>{stats.values[i]}</td>
                        <td className="px-6 py-4 font-black text-sm font-mono" style={{ color: '#4f46e5' }}>{stats.percentages[i]}%</td>
@@ -561,7 +571,7 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
                </table>
             </div>
             <div className="space-y-12">
-               <div className="h-64">
+               <div style={{ height: '256px' }}>
                  <h3 className="text-sm font-black uppercase mb-4 text-center" style={{ color: '#94a3b8' }}>التوزيع النسبي</h3>
                  <Pie 
                   data={chartData} 
@@ -569,12 +579,11 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
                     maintainAspectRatio: false, 
                     plugins: { 
                       legend: { position: 'bottom', labels: { font: { weight: 'bold', size: 10, family: 'Tajawal' }, color: '#64748b' } },
-                      datalabels: { color: '#fff', font: { weight: 'bold', size: 10, family: 'Tajawal' }, formatter: (v) => `${((v/data.length)*100).toFixed(0)}%` }
                     } 
                   }} 
                 />
                </div>
-               <div className="h-64 pt-8">
+               <div style={{ height: '256px', paddingTop: '32px' }}>
                  <h3 className="text-sm font-black uppercase mb-4 text-center" style={{ color: '#94a3b8' }}>التمثيل البياني</h3>
                  <Bar 
                   data={chartData} 
@@ -582,7 +591,6 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
                     maintainAspectRatio: false, 
                     plugins: { 
                       legend: { display: false },
-                      datalabels: { anchor: 'end', align: 'top', color: '#4f46e5', font: { weight: 'bold', size: 8, family: 'Tajawal' }, formatter: (v, ctx) => `${stats?.percentages[ctx.dataIndex]}%` }
                     },
                     scales: { 
                       y: { display: false }, 
@@ -594,7 +602,7 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
             </div>
           </div>
 
-          <div className="pt-20 border-t text-center" style={{ borderColor: '#f1f5f9' }}>
+          <div className="pt-20 text-center" style={{ borderTop: '1px solid #f1f5f9' }}>
             <p className="text-[10px] font-black uppercase tracking-[0.5em]" style={{ color: '#cbd5e1' }}>End of Official Report • Jamaa System</p>
           </div>
         </div>
