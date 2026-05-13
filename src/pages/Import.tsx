@@ -62,6 +62,74 @@ function detectDateColumn(rows: any[], col: string): boolean {
   return nonEmpty > 0 && (valid / nonEmpty) >= 0.5;
 }
 
+// ============================================================================
+// Smart sheet cleaning
+// Strips unnamed columns (e.g. "__EMPTY", "__EMPTY_1"), columns where every
+// cell is blank, and rows where every cell is blank. Returns the trimmed
+// rows + the meaningful column order. Never throws — returns empty result
+// if nothing useful is found so the caller can show a friendly message.
+// ============================================================================
+function cleanSheetData(rawRows: any[]): { rows: any[]; columns: string[] } {
+  if (!Array.isArray(rawRows) || rawRows.length === 0) {
+    return { rows: [], columns: [] };
+  }
+
+  const isBlank = (v: any) =>
+    v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+
+  // Pass 1: collect candidate columns from the union of all row keys
+  // (using only the first row's keys misses sparse data).
+  const allKeys = new Set<string>();
+  for (const row of rawRows) {
+    if (row && typeof row === 'object') {
+      Object.keys(row).forEach(k => allKeys.add(k));
+    }
+  }
+
+  // Pass 2: keep columns that (a) have a real header name and (b) contain
+  // at least one non-blank value across all rows.
+  const keptColumns: string[] = [];
+  for (const key of allKeys) {
+    // SheetJS auto-names headerless columns "__EMPTY", "__EMPTY_1", etc.
+    // Also skip purely-whitespace headers and stray blank keys.
+    const trimmedKey = String(key).trim();
+    if (!trimmedKey) continue;
+    if (/^__EMPTY(_\d+)?$/i.test(trimmedKey)) continue;
+
+    // Check if at least one row has data for this column
+    let hasData = false;
+    for (const row of rawRows) {
+      if (row && !isBlank(row[key])) { hasData = true; break; }
+    }
+    if (hasData) keptColumns.push(key);
+  }
+
+  if (keptColumns.length === 0) {
+    return { rows: [], columns: [] };
+  }
+
+  // Pass 3: rebuild rows containing only the kept columns, dropping
+  // any row that has no values in any of those columns.
+  const cleanedRows: any[] = [];
+  for (const row of rawRows) {
+    if (!row || typeof row !== 'object') continue;
+    const cleanedRow: Record<string, any> = {};
+    let rowHasAny = false;
+    for (const col of keptColumns) {
+      const v = row[col];
+      if (!isBlank(v)) {
+        cleanedRow[col] = v;
+        rowHasAny = true;
+      } else {
+        cleanedRow[col] = '';
+      }
+    }
+    if (rowHasAny) cleanedRows.push(cleanedRow);
+  }
+
+  return { rows: cleanedRows, columns: keptColumns };
+}
+
 // Shared chart option factories — same as Statistics for visual consistency
 function buildDonutOptions(opts: { total: number; isPdf?: boolean; cutout?: string; valueSize?: number; legendSize?: number; }) {
   const { total, isPdf = false, cutout, valueSize, legendSize } = opts;
@@ -165,10 +233,14 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
     wb.SheetNames.forEach(name => {
       try {
         const ws = wb.Sheets[name];
-        const json = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
-        const cols = json.length > 0 ? Object.keys(json[0] as object) : [];
-        sheets.push({ name, rows: json, columns: cols });
+        // raw JSON first, then strip empty columns/rows so previews and
+        // cross-sheet comparison only see meaningful data.
+        const rawJson = XLSX.utils.sheet_to_json(ws, { raw: true, defval: '' });
+        const { rows, columns: cols } = cleanSheetData(rawJson);
+        sheets.push({ name, rows, columns: cols });
       } catch (e) {
+        // Never propagate — just record an empty sheet entry.
+        console.warn(`Sheet "${name}" could not be parsed cleanly:`, e);
         sheets.push({ name, rows: [], columns: [] });
       }
     });
@@ -178,20 +250,40 @@ export default function Import({ onDataUpdate, initialData, initialColumns }: Im
   const loadSheet = useCallback((wb: XLSX.WorkBook, sheetName: string, sheets?: SheetData[]) => {
     try {
       const worksheet = wb.Sheets[sheetName];
-      if (!worksheet) { setErrorMsg(`الورقة "${sheetName}" غير موجودة.`); return; }
-      const json = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: '' });
-      if (json.length > 0) {
-        const cols = Object.keys(json[0] as object);
-        setData(json); setColumns(cols); setVisibleColumns(cols);
-        setAnalysisColumn(cols[0]); setCurrentSheet(sheetName);
-        onDataUpdate(json, cols, sheets ?? allSheets);
-        setErrorMsg(null);
-      } else {
-        setErrorMsg(`الورقة "${sheetName}" فارغة.`);
+      if (!worksheet) {
+        setErrorMsg(`الورقة "${sheetName}" غير موجودة.`);
+        return;
       }
+
+      // Parse everything, then run through the cleaner to drop empty columns,
+      // unnamed columns (__EMPTY*), and fully-blank rows.
+      const rawJson = XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: '' });
+      const { rows, columns: cols } = cleanSheetData(rawJson);
+
+      if (cols.length === 0 || rows.length === 0) {
+        // No real data at all — show a soft message, don't throw.
+        setData([]);
+        setColumns([]);
+        setVisibleColumns([]);
+        setAnalysisColumn('');
+        setCurrentSheet(sheetName);
+        onDataUpdate([], [], sheets ?? allSheets);
+        setErrorMsg(`الورقة "${sheetName}" لا تحتوي على بيانات قابلة للتحليل.`);
+        return;
+      }
+
+      setData(rows);
+      setColumns(cols);
+      setVisibleColumns(cols);
+      setAnalysisColumn(cols[0]);
+      setCurrentSheet(sheetName);
+      onDataUpdate(rows, cols, sheets ?? allSheets);
+      setErrorMsg(null);
     } catch (err) {
+      // Even on unexpected errors, fall back gracefully instead of leaving
+      // the user staring at a hard error.
       console.error("Error loading sheet:", err);
-      setErrorMsg("حدث خطأ أثناء قراءة الورقة.");
+      setErrorMsg(`تعذّر قراءة الورقة "${sheetName}" بشكل كامل. تم تخطّي الأعمدة الفارغة.`);
     }
   }, [onDataUpdate, allSheets]);
 

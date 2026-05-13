@@ -73,24 +73,6 @@ function isDateColumn(data: any[], column: string): boolean {
   return (valid / nonEmpty) >= 0.5;
 }
 
-function formatDuration(days: number): string {
-  if (days < 0) return `${days} يوم`;
-  if (days === 0) return 'نفس اليوم';
-  const years = Math.floor(days / 365);
-  const remainingAfterYears = days - (years * 365);
-  const months = Math.floor(remainingAfterYears / 30);
-  const remainingDays = remainingAfterYears - (months * 30);
-  if (years > 0) {
-    if (months > 0) return `${years} سنة و ${months} شهر`;
-    return `${years} سنة`;
-  }
-  if (months > 0) {
-    if (remainingDays > 0) return `${months} شهر و ${remainingDays} يوم`;
-    return `${months} شهر`;
-  }
-  return `${days} يوم`;
-}
-
 function getUniqueValues(rows: any[], col: string, limit: number = 50): string[] {
   const set = new Set<string>();
   for (const row of rows) {
@@ -326,39 +308,94 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
 
   const durationStats = useMemo(() => {
     if (!durationCalculated || !startDateCol || !endDateCol || !data.length) return null;
-    const rows: Array<any> = [];
-    let negativeCount = 0, invalidCount = 0;
+
+    type DurationRow = {
+      index: number;
+      start: Date | null;
+      end: Date | null;
+      diffDays: number | null;
+      formatted: string;
+      status: 'ok' | 'missing' | 'invalid';
+    };
+
+    const rows: DurationRow[] = [];
+    let invalidCount = 0;   // end < start
+    let missingCount = 0;   // one or both dates absent
     let validDiffs: number[] = [];
+
     data.forEach((row, idx) => {
-      const start = parseDate(row[startDateCol]);
-      const end = parseDate(row[endDateCol]);
+      // Spec: ignore fully empty rows.
+      const allEmpty = Object.values(row).every(
+        v => v === null || v === undefined || (typeof v === 'string' && v.trim() === '')
+      );
+      if (allEmpty) return;
+
+      const startRaw = row[startDateCol];
+      const endRaw = row[endDateCol];
+      const startEmpty = startRaw === null || startRaw === undefined || (typeof startRaw === 'string' && startRaw.trim() === '');
+      const endEmpty = endRaw === null || endRaw === undefined || (typeof endRaw === 'string' && endRaw.trim() === '');
+
+      const start = startEmpty ? null : parseDate(startRaw);
+      const end = endEmpty ? null : parseDate(endRaw);
+
+      // Spec: missing date → "غير متوفر"
       if (!start || !end) {
-        rows.push({ index: idx, start, end, diffDays: null, diffMonths: null, diffYears: null, formatted: 'تاريخ غير صالح', invalid: true, negative: false });
-        invalidCount++; return;
+        rows.push({
+          index: idx, start, end,
+          diffDays: null,
+          formatted: 'غير متوفر',
+          status: 'missing',
+        });
+        missingCount++;
+        return;
       }
+
       const diffMs = end.getTime() - start.getTime();
       const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-      const negative = diffDays < 0;
-      if (negative) negativeCount++;
-      const absDays = Math.abs(diffDays);
+
+      // Spec: end < start → "تاريخ غير صحيح"
+      if (diffDays < 0) {
+        rows.push({
+          index: idx, start, end,
+          diffDays,
+          formatted: 'تاريخ غير صحيح',
+          status: 'invalid',
+        });
+        invalidCount++;
+        return;
+      }
+
       rows.push({
         index: idx, start, end, diffDays,
-        diffMonths: Math.round(absDays / 30),
-        diffYears: Math.round((absDays / 365) * 10) / 10,
-        formatted: negative ? `⚠ ${formatDuration(absDays)} (سالب)` : formatDuration(absDays),
-        invalid: false, negative,
+        formatted: diffDays === 0 ? 'نفس اليوم' : `${diffDays} يوم`,
+        status: 'ok',
       });
-      if (!negative) validDiffs.push(diffDays);
+      validDiffs.push(diffDays);
     });
+
     if (validDiffs.length === 0) {
-      return { rows, total: data.length, validCount: 0, invalidCount, negativeCount, avgDays: 0, avgMonths: 0, avgYears: 0, minDays: 0, maxDays: 0 };
+      return {
+        rows,
+        total: rows.length,
+        validCount: 0,
+        missingCount,
+        invalidCount,
+        avgDays: 0,
+        minDays: 0,
+        maxDays: 0,
+      };
     }
     const sum = validDiffs.reduce((a, b) => a + b, 0);
     const avgDays = Math.round(sum / validDiffs.length);
     return {
-      rows, total: data.length, validCount: validDiffs.length, invalidCount, negativeCount,
-      avgDays, avgMonths: Math.round(avgDays / 30), avgYears: Math.round((avgDays / 365) * 10) / 10,
-      minDays: Math.min(...validDiffs), maxDays: Math.max(...validDiffs),
+      rows,
+      total: rows.length,
+      validCount: validDiffs.length,
+      missingCount,
+      invalidCount,
+      avgDays,
+      minDays: Math.min(...validDiffs),
+      maxDays: Math.max(...validDiffs),
     };
   }, [durationCalculated, startDateCol, endDateCol, data]);
 
@@ -560,8 +597,22 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
 
   const pdfOptions: Array<{ id: PdfSection; label: string; fr: string; icon: any; desc: string; disabled?: boolean; }> = [
     { id: 'statistics', label: 'التحليلات والمؤشرات الرقمية', fr: 'Statistiques générales', icon: BarChart3, desc: 'الرسومات البيانية + جدول التوزيع' },
-    { id: 'duration_summary', label: 'ملخص تحليل المدة', fr: 'Résumé de durée', icon: CalendarClock, desc: 'البطاقات الإحصائية', disabled: !durationCalculated || !durationStats },
-    { id: 'duration_table', label: 'جدول المدد المحسوبة', fr: 'Tableau des durées', icon: TableIcon, desc: 'الجدول الكامل', disabled: !durationCalculated || !durationStats },
+    {
+      id: 'duration_summary',
+      label: 'ملخص تحليل المدة',
+      fr: 'Résumé de durée',
+      icon: CalendarClock,
+      desc: 'العدد الإجمالي • متوسط المدة • أقصر مدة • أطول مدة',
+      disabled: !durationCalculated || !durationStats,
+    },
+    {
+      id: 'duration_table',
+      label: 'جدول المدد المحسوبة',
+      fr: 'Tableau des durées',
+      icon: TableIcon,
+      desc: 'جدول كامل بتاريخ البداية والنهاية والمدة لكل صف',
+      disabled: !durationCalculated || !durationStats,
+    },
     { id: 'cross_sheet', label: 'مقارنة بين الأوراق', fr: 'Comparaison entre feuilles', icon: GitCompare, desc: 'مقارنة عمودين من ورقتين مختلفتين', disabled: !csCalculated || !crossSheetResult },
   ];
 
@@ -988,26 +1039,88 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
           {durationCalculated && durationStats && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="border-t border-slate-50">
               <div className="p-10 space-y-10">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {/* Spec-required summary cards: total / avg / min / max */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
-                    { label: 'المتوسط بالأيام', value: durationStats.avgDays, unit: 'يوم', icon: Clock, color: 'indigo' },
-                    { label: 'المتوسط بالشهور', value: durationStats.avgMonths, unit: 'شهر', icon: Calendar, color: 'blue' },
-                    { label: 'المتوسط بالسنوات', value: durationStats.avgYears, unit: 'سنة', icon: CalendarDays, color: 'purple' },
-                    { label: 'أقل مدة', value: durationStats.minDays, unit: 'يوم', icon: TrendingUp, color: 'emerald' },
-                    { label: 'أكبر مدة', value: durationStats.maxDays, unit: 'يوم', icon: ArrowUpRight, color: 'amber' },
-                    { label: 'سجلات صالحة', value: durationStats.validCount, unit: `/ ${durationStats.total}`, icon: Hash, color: 'pink' },
+                    { label: 'العدد الإجمالي', value: durationStats.total, unit: 'صف', icon: Hash, color: 'indigo' },
+                    { label: 'متوسط المدة', value: durationStats.avgDays, unit: 'يوم', icon: Clock, color: 'blue' },
+                    { label: 'أقصر مدة', value: durationStats.minDays, unit: 'يوم', icon: TrendingUp, color: 'emerald' },
+                    { label: 'أطول مدة', value: durationStats.maxDays, unit: 'يوم', icon: ArrowUpRight, color: 'amber' },
                   ].map((item, i) => (
-                    <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="bg-white p-5 rounded-3xl border border-slate-100">
-                      <div className={`w-10 h-10 rounded-2xl bg-${item.color}-50 text-${item.color}-500 flex items-center justify-center mb-3`}>
-                        <item.icon size={18} strokeWidth={2.5} />
+                    <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="bg-white p-6 rounded-3xl border border-slate-100">
+                      <div className={`w-12 h-12 rounded-2xl bg-${item.color}-50 text-${item.color}-500 flex items-center justify-center mb-4`}>
+                        <item.icon size={22} strokeWidth={2.5} />
                       </div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{item.label}</p>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-2xl font-black text-slate-900 font-mono">{item.value}</span>
-                        <span className="text-[10px] font-black text-slate-300">{item.unit}</span>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{item.label}</p>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-3xl font-black text-slate-900 font-mono">{item.value}</span>
+                        <span className="text-xs font-black text-slate-300">{item.unit}</span>
                       </div>
                     </motion.div>
                   ))}
+                </div>
+
+                {/* Spec-required data table: start | end | duration */}
+                <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden">
+                  <div className="p-6 border-b border-slate-50 flex items-center justify-between flex-wrap gap-3">
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900">جدول المدد المحسوبة</h3>
+                      <p className="text-xs font-bold text-slate-400 mt-1">
+                        {durationStats.validCount} صحيح
+                        {durationStats.missingCount > 0 && ` • ${durationStats.missingCount} غير متوفر`}
+                        {durationStats.invalidCount > 0 && ` • ${durationStats.invalidCount} غير صحيح`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-black text-slate-300 uppercase tracking-widest">
+                      <Calendar size={14} />
+                      <span>{startDateCol} ← {endDateCol}</span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto max-h-[520px]">
+                    <table className="w-full text-right">
+                      <thead className="sticky top-0 bg-slate-50/90 backdrop-blur-md z-10">
+                        <tr>
+                          <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">#</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{startDateCol}</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{endDateCol}</th>
+                          <th className="px-6 py-4 text-[10px] font-black text-indigo-500 uppercase tracking-widest bg-indigo-50/40">المدة</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {durationStats.rows.slice(0, 200).map((r) => (
+                          <tr
+                            key={r.index}
+                            className={cn(
+                              "hover:bg-slate-50/50 transition-all",
+                              r.status === 'missing' && "bg-slate-50/30",
+                              r.status === 'invalid' && "bg-rose-50/30"
+                            )}
+                          >
+                            <td className="px-6 py-4 text-xs font-black text-slate-300 font-mono">{r.index + 1}</td>
+                            <td className="px-6 py-4 text-xs font-black text-slate-600 font-mono">
+                              {r.start ? r.start.toLocaleDateString('fr-FR') : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-6 py-4 text-xs font-black text-slate-600 font-mono">
+                              {r.end ? r.end.toLocaleDateString('fr-FR') : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className={cn(
+                              "px-6 py-4 text-xs font-black bg-indigo-50/20",
+                              r.status === 'ok' && "text-indigo-600",
+                              r.status === 'missing' && "text-slate-400",
+                              r.status === 'invalid' && "text-rose-500"
+                            )}>
+                              {r.formatted}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {durationStats.rows.length > 200 && (
+                    <div className="px-6 py-4 text-center text-xs font-bold text-slate-400 bg-slate-50 border-t border-slate-100">
+                      عرض أول 200 صف من أصل {durationStats.rows.length} • التصدير إلى PDF يشمل المزيد
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -1081,6 +1194,47 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
                   <X size={18} />
                 </button>
               </div>
+
+              {/* Quick presets — let users one-tap common combinations */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const all = new Set<PdfSection>();
+                    all.add('statistics');
+                    if (durationCalculated && durationStats) { all.add('duration_summary'); all.add('duration_table'); }
+                    if (csCalculated && crossSheetResult) all.add('cross_sheet');
+                    setPdfSections(all);
+                  }}
+                  className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all"
+                >
+                  كل المحتوى
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPdfSections(new Set(['statistics']))}
+                  className="px-4 py-2 bg-slate-50 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all"
+                >
+                  إحصائيات فقط
+                </button>
+                {durationCalculated && durationStats && (
+                  <button
+                    type="button"
+                    onClick={() => setPdfSections(new Set(['duration_summary', 'duration_table']))}
+                    className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all"
+                  >
+                    تحليل المدة فقط
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPdfSections(new Set())}
+                  className="px-4 py-2 bg-slate-50 text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all"
+                >
+                  مسح الكل
+                </button>
+              </div>
+
               <div className="space-y-3">
                 {pdfOptions.map((opt) => {
                   const isSelected = pdfSections.has(opt.id);
@@ -1368,51 +1522,93 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
               DURATION REPORT
               ==================================================== */}
           {isPdfDuration && durationStats && (
-            <div className="space-y-6">
-              <h3 className="text-xl font-black pr-4" style={{ color: '#0f172a', borderRight: '4px solid #4f46e5' }}>
-                تحليل المدة: {startDateCol} → {endDateCol}
-              </h3>
-              
+            <div className="space-y-8">
+              {/* Spec-required title centered, with the two date columns shown below */}
+              <div className="text-center pb-4">
+                <h2 className="font-black" style={{ color: '#0f172a', fontSize: '28px', fontFamily: "'Tajawal', 'Cairo', 'Segoe UI', 'Arial', sans-serif", letterSpacing: 'normal', wordSpacing: 'normal', lineHeight: 1.4, margin: 0 }}>
+                  تحليل المدة بين تاريخين
+                </h2>
+                <p className="text-sm font-bold mt-3" style={{ color: '#64748b' }}>
+                  {startDateCol} <span style={{ color: '#cbd5e1' }}> ← </span> {endDateCol}
+                </p>
+              </div>
+
               {activePdfSections.has('duration_summary') && (
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#eef2ff' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#6366f1' }}>متوسط الأيام</p>
-                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#4f46e5' }}>{durationStats.avgDays}</p>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#eef2ff', border: '1px solid #e0e7ff' }}>
+                    <p className="text-[10px] font-black uppercase" style={{ color: '#6366f1' }}>العدد الإجمالي</p>
+                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#4f46e5' }}>{durationStats.total}</p>
+                    <p className="text-[10px] font-bold mt-1" style={{ color: '#6366f1' }}>صف</p>
                   </div>
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#f0fdf4' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#10b981' }}>أقل مدة</p>
+                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#dbeafe', border: '1px solid #bfdbfe' }}>
+                    <p className="text-[10px] font-black uppercase" style={{ color: '#3b82f6' }}>متوسط المدة</p>
+                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#2563eb' }}>{durationStats.avgDays}</p>
+                    <p className="text-[10px] font-bold mt-1" style={{ color: '#3b82f6' }}>يوم</p>
+                  </div>
+                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#f0fdf4', border: '1px solid #dcfce7' }}>
+                    <p className="text-[10px] font-black uppercase" style={{ color: '#10b981' }}>أقصر مدة</p>
                     <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#059669' }}>{durationStats.minDays}</p>
                     <p className="text-[10px] font-bold mt-1" style={{ color: '#10b981' }}>يوم</p>
                   </div>
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#fef3c7' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#f59e0b' }}>أكبر مدة</p>
+                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#fef3c7', border: '1px solid #fde68a' }}>
+                    <p className="text-[10px] font-black uppercase" style={{ color: '#f59e0b' }}>أطول مدة</p>
                     <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#d97706' }}>{durationStats.maxDays}</p>
                     <p className="text-[10px] font-bold mt-1" style={{ color: '#f59e0b' }}>يوم</p>
                   </div>
                 </div>
               )}
 
+              {activePdfSections.has('duration_summary') && (durationStats.missingCount > 0 || durationStats.invalidCount > 0) && (
+                <div className="p-4 rounded-2xl" style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca' }}>
+                  <p className="text-xs font-bold" style={{ color: '#991b1b' }}>
+                    {durationStats.missingCount > 0 && `• ${durationStats.missingCount} صف بتاريخ غير متوفر `}
+                    {durationStats.invalidCount > 0 && `• ${durationStats.invalidCount} صف بتاريخ غير صحيح (نهاية قبل البداية)`}
+                  </p>
+                </div>
+              )}
+
               {activePdfSections.has('duration_table') && (
-                <table className="w-full text-right" style={{ borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#f8fafc' }}>
-                      <th className="px-3 py-3 text-[10px] font-black" style={{ color: '#94a3b8' }}>#</th>
-                      <th className="px-3 py-3 text-[10px] font-black" style={{ color: '#94a3b8' }}>{startDateCol}</th>
-                      <th className="px-3 py-3 text-[10px] font-black" style={{ color: '#94a3b8' }}>{endDateCol}</th>
-                      <th className="px-3 py-3 text-[10px] font-black" style={{ color: '#4f46e5' }}>المدة</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {durationStats.rows.slice(0, 60).map((r: any) => (
-                      <tr key={r.index} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td className="px-3 py-2 text-[10px] font-mono" style={{ color: '#cbd5e1' }}>{r.index + 1}</td>
-                        <td className="px-3 py-2 text-[10px] font-black" style={{ color: '#475569' }}>{r.start ? r.start.toLocaleDateString('fr-FR') : '-'}</td>
-                        <td className="px-3 py-2 text-[10px] font-black" style={{ color: '#475569' }}>{r.end ? r.end.toLocaleDateString('fr-FR') : '-'}</td>
-                        <td className="px-3 py-2 text-[10px] font-black" style={{ color: r.invalid ? '#dc2626' : r.negative ? '#d97706' : '#4f46e5' }}>{r.formatted}</td>
+                <div>
+                  <h3 className="text-base font-black mb-4 pr-3" style={{ color: '#0f172a', borderRight: '4px solid #4f46e5' }}>
+                    جدول المدد المحسوبة
+                  </h3>
+                  <table className="w-full text-right" style={{ borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#f1f5f9' }}>
+                        <th className="px-4 py-3 text-[10px] font-black" style={{ color: '#475569' }}>#</th>
+                        <th className="px-4 py-3 text-[10px] font-black" style={{ color: '#475569' }}>{startDateCol}</th>
+                        <th className="px-4 py-3 text-[10px] font-black" style={{ color: '#475569' }}>{endDateCol}</th>
+                        <th className="px-4 py-3 text-[10px] font-black" style={{ color: '#4f46e5' }}>المدة</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {durationStats.rows.slice(0, 150).map((r) => (
+                        <tr key={r.index} style={{
+                          borderBottom: '1px solid #f1f5f9',
+                          backgroundColor: r.status === 'invalid' ? '#fef2f2' : r.status === 'missing' ? '#fafafa' : 'transparent',
+                        }}>
+                          <td className="px-4 py-2.5 text-[11px] font-mono" style={{ color: '#cbd5e1' }}>{r.index + 1}</td>
+                          <td className="px-4 py-2.5 text-[11px] font-black font-mono" style={{ color: '#475569' }}>
+                            {r.start ? r.start.toLocaleDateString('fr-FR') : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-[11px] font-black font-mono" style={{ color: '#475569' }}>
+                            {r.end ? r.end.toLocaleDateString('fr-FR') : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-[11px] font-black" style={{
+                            color: r.status === 'invalid' ? '#dc2626' : r.status === 'missing' ? '#94a3b8' : '#4f46e5',
+                          }}>
+                            {r.formatted}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {durationStats.rows.length > 150 && (
+                    <p className="text-[10px] font-bold text-center mt-3" style={{ color: '#94a3b8' }}>
+                      عرض أول 150 صف من أصل {durationStats.rows.length}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}
