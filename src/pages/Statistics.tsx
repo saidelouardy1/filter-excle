@@ -201,6 +201,9 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
   const [endDateCol, setEndDateCol] = useState<string>('');
   const [durationCalculated, setDurationCalculated] = useState(false);
   const [durationWarning, setDurationWarning] = useState<string | null>(null);
+  // Optional date-range filter on the START date column (yyyy-mm-dd from <input type="date">)
+  const [filterFrom, setFilterFrom] = useState<string>('');
+  const [filterTo, setFilterTo] = useState<string>('');
   
   const [showPdfPicker, setShowPdfPicker] = useState(false);
   const [pdfSections, setPdfSections] = useState<Set<PdfSection>>(new Set(['statistics']));
@@ -318,9 +321,17 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
       status: 'ok' | 'missing' | 'invalid';
     };
 
+    // Parse the filter inputs once. Empty strings = no bound on that side.
+    const fromDate = filterFrom ? new Date(filterFrom + 'T00:00:00') : null;
+    const toDate = filterTo ? new Date(filterTo + 'T23:59:59') : null;
+    const hasFilter = !!(fromDate || toDate);
+    const fromMs = fromDate && !isNaN(fromDate.getTime()) ? fromDate.getTime() : null;
+    const toMs = toDate && !isNaN(toDate.getTime()) ? toDate.getTime() : null;
+
     const rows: DurationRow[] = [];
     let invalidCount = 0;   // end < start
     let missingCount = 0;   // one or both dates absent
+    let filteredOut = 0;    // skipped because outside the date filter range
     let validDiffs: number[] = [];
 
     data.forEach((row, idx) => {
@@ -337,6 +348,18 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
 
       const start = startEmpty ? null : parseDate(startRaw);
       const end = endEmpty ? null : parseDate(endRaw);
+
+      // Apply the date-range filter to the START date. Rows with a valid start
+      // date that falls outside [fromDate, toDate] are silently skipped from
+      // the table and the statistics. Rows with a missing start date are kept
+      // when no filter is active, but excluded when a filter is set (because
+      // we can't tell if they fall in the range).
+      if (hasFilter) {
+        if (!start) { filteredOut++; return; }
+        const ms = start.getTime();
+        if (fromMs !== null && ms < fromMs) { filteredOut++; return; }
+        if (toMs !== null && ms > toMs) { filteredOut++; return; }
+      }
 
       // Spec: missing date → "غير متوفر"
       if (!start || !end) {
@@ -380,6 +403,7 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
         validCount: 0,
         missingCount,
         invalidCount,
+        filteredOut,
         avgDays: 0,
         minDays: 0,
         maxDays: 0,
@@ -393,11 +417,12 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
       validCount: validDiffs.length,
       missingCount,
       invalidCount,
+      filteredOut,
       avgDays,
       minDays: Math.min(...validDiffs),
       maxDays: Math.max(...validDiffs),
     };
-  }, [durationCalculated, startDateCol, endDateCol, data]);
+  }, [durationCalculated, startDateCol, endDateCol, data, filterFrom, filterTo]);
 
   const handleCalculateDuration = () => {
     setDurationWarning(null);
@@ -1013,6 +1038,64 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
                   </select>
                 </div>
               </div>
+
+              {/* Optional date-range filter on the start date */}
+              <div className="bg-indigo-50/40 border border-indigo-100 rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-white text-indigo-500 flex items-center justify-center border border-indigo-100">
+                      <Filter size={18} />
+                    </div>
+                    <div>
+                      <p className="font-black text-sm text-indigo-700">تصفية حسب فترة زمنية (اختياري)</p>
+                      <p className="text-[10px] font-bold text-indigo-400">Filtrer par plage de dates — يطبَّق على عمود تاريخ البداية</p>
+                    </div>
+                  </div>
+                  {(filterFrom || filterTo) && (
+                    <button
+                      type="button"
+                      onClick={() => { setFilterFrom(''); setFilterTo(''); }}
+                      className="text-[10px] font-black text-indigo-500 hover:text-indigo-700 uppercase tracking-widest px-3 py-1.5 bg-white rounded-full border border-indigo-100 transition-all"
+                    >
+                      مسح التصفية
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">
+                      من / De
+                    </label>
+                    <input
+                      type="date"
+                      value={filterFrom}
+                      max={filterTo || undefined}
+                      onChange={(e) => setFilterFrom(e.target.value)}
+                      className="w-full h-12 px-4 bg-white border-2 border-indigo-100 hover:border-indigo-300 rounded-2xl font-black text-sm text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">
+                      إلى / À
+                    </label>
+                    <input
+                      type="date"
+                      value={filterTo}
+                      min={filterFrom || undefined}
+                      onChange={(e) => setFilterTo(e.target.value)}
+                      className="w-full h-12 px-4 bg-white border-2 border-indigo-100 hover:border-indigo-300 rounded-2xl font-black text-sm text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                    />
+                  </div>
+                </div>
+                {(filterFrom || filterTo) && durationCalculated && durationStats && (
+                  <div className="text-[11px] font-black text-indigo-600 bg-white px-4 py-2 rounded-2xl border border-indigo-100 inline-flex items-center gap-2">
+                    <CheckCircle2 size={14} />
+                    <span>
+                      تم تصفية {durationStats.filteredOut} صف خارج النطاق • تم احتساب {durationStats.total} صف
+                    </span>
+                  </div>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-4">
                 <button onClick={handleCalculateDuration} disabled={!startDateCol || !endDateCol || startDateCol === endDateCol}
                   className="flex items-center gap-3 bg-indigo-600 text-white px-8 h-14 rounded-2xl font-black shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-40">
@@ -1533,32 +1616,31 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
                 </p>
               </div>
 
-              {activePdfSections.has('duration_summary') && (
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#eef2ff', border: '1px solid #e0e7ff' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#6366f1' }}>العدد الإجمالي</p>
-                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#4f46e5' }}>{durationStats.total}</p>
-                    <p className="text-[10px] font-bold mt-1" style={{ color: '#6366f1' }}>صف</p>
-                  </div>
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#dbeafe', border: '1px solid #bfdbfe' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#3b82f6' }}>متوسط المدة</p>
-                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#2563eb' }}>{durationStats.avgDays}</p>
-                    <p className="text-[10px] font-bold mt-1" style={{ color: '#3b82f6' }}>يوم</p>
-                  </div>
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#f0fdf4', border: '1px solid #dcfce7' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#10b981' }}>أقصر مدة</p>
-                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#059669' }}>{durationStats.minDays}</p>
-                    <p className="text-[10px] font-bold mt-1" style={{ color: '#10b981' }}>يوم</p>
-                  </div>
-                  <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#fef3c7', border: '1px solid #fde68a' }}>
-                    <p className="text-[10px] font-black uppercase" style={{ color: '#f59e0b' }}>أطول مدة</p>
-                    <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#d97706' }}>{durationStats.maxDays}</p>
-                    <p className="text-[10px] font-bold mt-1" style={{ color: '#f59e0b' }}>يوم</p>
-                  </div>
+              {/* Spec: summary cards (total / avg / min / max) always appear with the duration section */}
+              <div className="grid grid-cols-4 gap-4">
+                <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#eef2ff', border: '1px solid #e0e7ff' }}>
+                  <p className="text-[10px] font-black uppercase" style={{ color: '#6366f1' }}>العدد الإجمالي</p>
+                  <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#4f46e5' }}>{durationStats.total}</p>
+                  <p className="text-[10px] font-bold mt-1" style={{ color: '#6366f1' }}>صف</p>
                 </div>
-              )}
+                <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#dbeafe', border: '1px solid #bfdbfe' }}>
+                  <p className="text-[10px] font-black uppercase" style={{ color: '#3b82f6' }}>متوسط المدة</p>
+                  <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#2563eb' }}>{durationStats.avgDays}</p>
+                  <p className="text-[10px] font-bold mt-1" style={{ color: '#3b82f6' }}>يوم</p>
+                </div>
+                <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#f0fdf4', border: '1px solid #dcfce7' }}>
+                  <p className="text-[10px] font-black uppercase" style={{ color: '#10b981' }}>أقصر مدة</p>
+                  <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#059669' }}>{durationStats.minDays}</p>
+                  <p className="text-[10px] font-bold mt-1" style={{ color: '#10b981' }}>يوم</p>
+                </div>
+                <div className="p-5 rounded-2xl text-center" style={{ backgroundColor: '#fef3c7', border: '1px solid #fde68a' }}>
+                  <p className="text-[10px] font-black uppercase" style={{ color: '#f59e0b' }}>أطول مدة</p>
+                  <p className="text-3xl font-black mt-2 font-mono" style={{ color: '#d97706' }}>{durationStats.maxDays}</p>
+                  <p className="text-[10px] font-bold mt-1" style={{ color: '#f59e0b' }}>يوم</p>
+                </div>
+              </div>
 
-              {activePdfSections.has('duration_summary') && (durationStats.missingCount > 0 || durationStats.invalidCount > 0) && (
+              {(durationStats.missingCount > 0 || durationStats.invalidCount > 0) && (
                 <div className="p-4 rounded-2xl" style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca' }}>
                   <p className="text-xs font-bold" style={{ color: '#991b1b' }}>
                     {durationStats.missingCount > 0 && `• ${durationStats.missingCount} صف بتاريخ غير متوفر `}
