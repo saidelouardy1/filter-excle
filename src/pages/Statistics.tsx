@@ -685,24 +685,26 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
 
-      // ── REDUCED TOP MARGIN ───────────────────────────────────────────────
-      const marginTop = 1;       // was 4 — minimal top margin
+      const marginTopPage1 = 1;   // tight on page 1 (header fills it)
+      const marginTopRest  = 12;  // breathing room on pages 2, 3, …
       const marginBottom = 8;
       const marginLeft = 12;
       const marginRight = 12;
-      // ─────────────────────────────────────────────────────────────────────
 
       const usableWidth = pdfWidth - marginLeft - marginRight;
-      const usableHeight = pdfHeight - marginTop - marginBottom;
 
       let sourceY = 0;
       let pageIndex = 0;
 
-      const sliceHeightPx = Math.floor(
-        (usableHeight * canvas.width) / usableWidth
-      );
-
       while (sourceY < canvas.height) {
+        const marginTop = pageIndex === 0 ? marginTopPage1 : marginTopRest;
+        const usableHeight = pdfHeight - marginTop - marginBottom;
+
+        // Recalculate slice height per page so each page uses its own usableHeight
+        const sliceHeightPx = Math.floor(
+          (usableHeight * canvas.width) / usableWidth
+        );
+
         const pageCanvas = document.createElement('canvas');
         pageCanvas.width = canvas.width;
         pageCanvas.height = Math.min(sliceHeightPx, canvas.height - sourceY);
@@ -712,14 +714,10 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
 
         ctx.drawImage(
           canvas,
-          0,
-          sourceY,
-          canvas.width,
-          pageCanvas.height,
-          0,
-          0,
-          canvas.width,
-          pageCanvas.height
+          0, sourceY,
+          canvas.width, pageCanvas.height,
+          0, 0,
+          canvas.width, pageCanvas.height
         );
 
         const imgData = pageCanvas.toDataURL('image/png');
@@ -727,14 +725,7 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
 
         if (pageIndex > 0) pdf.addPage();
 
-        pdf.addImage(
-          imgData,
-          'PNG',
-          marginLeft,
-          marginTop,
-          usableWidth,
-          imgHeight
-        );
+        pdf.addImage(imgData, 'PNG', marginLeft, marginTop, usableWidth, imgHeight);
 
         sourceY += sliceHeightPx;
         pageIndex++;
