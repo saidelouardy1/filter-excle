@@ -686,7 +686,7 @@ export default function Statistics({ data, columns, allSheets }: StatisticsProps
       const pdfHeight = pdf.internal.pageSize.getHeight();
 
       const marginTopPage1 = 1;   // tight on page 1 (header fills it)
-      const marginTopRest  = 12;  // breathing room on pages 2, 3, …
+      const marginTopRest  = 14;  // breathing room on pages 2, 3, …
       const marginBottom = 8;
       const marginLeft = 12;
       const marginRight = 12;
