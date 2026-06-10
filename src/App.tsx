@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { FileUp, BarChart3, CalendarDays } from 'lucide-react';
 import Statistics from './pages/Statistics';
 import Import from './pages/Import';
-import PHAnalysis from './pages/phanalysis';
+import PHAnalysis from './pages/Phanalysis';
 import { cn } from './lib/utils';
 
 const PageTransition = ({ children }: { children: React.ReactNode }) => {
