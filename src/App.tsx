@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, Navigate, Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { FileUp, BarChart3 } from 'lucide-react';
+import { FileUp, BarChart3, CalendarDays } from 'lucide-react';
 import Statistics from './pages/Statistics';
 import Import from './pages/Import';
+import PHAnalysis from './pages/phanalysis';
 import { cn } from './lib/utils';
 
 const PageTransition = ({ children }: { children: React.ReactNode }) => {
@@ -25,10 +26,11 @@ const PageTransition = ({ children }: { children: React.ReactNode }) => {
 
 const HeaderTabs = () => {
   const location = useLocation();
-  
+
   const tabs = [
     { path: '/', label: 'الاستيراد', icon: FileUp },
     { path: '/statistics', label: 'الإحصائيات', icon: BarChart3 },
+    { path: '/ph-analysis', label: 'تحليل PH', icon: CalendarDays },
   ];
 
   return (
@@ -55,7 +57,6 @@ const HeaderTabs = () => {
   );
 };
 
-// NEW: shape that holds every sheet of the workbook for cross-sheet comparison
 export interface SheetData {
   name: string;
   rows: any[];
@@ -65,7 +66,6 @@ export interface SheetData {
 function MainApp() {
   const [sharedData, setSharedData] = useState<any[]>([]);
   const [sharedColumns, setSharedColumns] = useState<string[]>([]);
-  // NEW: all sheets of the workbook (each with its own rows + columns)
   const [allSheets, setAllSheets] = useState<SheetData[]>([]);
 
   useEffect(() => {
@@ -76,33 +76,29 @@ function MainApp() {
     if (savedCols) setSharedColumns(JSON.parse(savedCols));
     if (savedSheets) {
       try {
-        const parsed = JSON.parse(savedSheets);
-        // Dates were serialised to ISO strings — leave them as strings (parseDate handles both)
-        setAllSheets(parsed);
+        setAllSheets(JSON.parse(savedSheets));
       } catch {}
     }
   }, []);
 
   const handleDataUpdate = (
-    data: any[], 
-    cols: string[], 
+    data: any[],
+    cols: string[],
     sheets?: SheetData[]
   ) => {
     setSharedData(data);
     setSharedColumns(cols);
     sessionStorage.setItem('excel_data', JSON.stringify(data));
     sessionStorage.setItem('excel_columns', JSON.stringify(cols));
-    
+
     if (sheets) {
       setAllSheets(sheets);
       try {
         sessionStorage.setItem('excel_all_sheets', JSON.stringify(sheets));
       } catch (e) {
-        // sessionStorage has size limits; if it fails just keep in-memory
         console.warn('Could not persist all sheets to sessionStorage:', e);
       }
     } else if (data.length === 0) {
-      // Cleared
       setAllSheets([]);
       sessionStorage.removeItem('excel_all_sheets');
     }
@@ -124,29 +120,38 @@ function MainApp() {
         <div className="flex-1 p-10 overflow-y-auto scrollbar-hide">
           <div className="w-full pb-10">
             <Routes>
-              <Route 
-                path="/" 
+              <Route
+                path="/"
                 element={
                   <PageTransition>
-                    <Import 
-                      onDataUpdate={handleDataUpdate} 
-                      initialData={sharedData} 
-                      initialColumns={sharedColumns} 
+                    <Import
+                      onDataUpdate={handleDataUpdate}
+                      initialData={sharedData}
+                      initialColumns={sharedColumns}
                     />
                   </PageTransition>
-                } 
+                }
               />
-              <Route 
-                path="/statistics" 
+              <Route
+                path="/statistics"
                 element={
                   <PageTransition>
-                    <Statistics 
-                      data={sharedData} 
-                      columns={sharedColumns} 
+                    <Statistics
+                      data={sharedData}
+                      columns={sharedColumns}
                       allSheets={allSheets}
                     />
                   </PageTransition>
-                } 
+                }
+              />
+              <Route
+                path="/ph-analysis"
+                element={
+                  <PageTransition>
+                    {/* ✅ columns prop added */}
+                    <PHAnalysis data={sharedData} columns={sharedColumns} />
+                  </PageTransition>
+                }
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
